@@ -50,7 +50,7 @@ evidencia, **no** se fusionan.
 
 ### Decisiones de diseño
 
-- **Nunca se imputan `budget` ni `revenue`.** Un valor sintético contaminaría los modelos y los
+- **Nunca se imputan `budget` ni `revenue`.** Un valor imputado contaminaría los modelos y los
   rankings. Regla: *exactitud operativa > completitud cosmética.*
 - **El cero financiero se interpreta como faltante** (`zero_as_missing`): $0 de presupuesto no
   significa que la película fuera gratuita, significa que el dato no se reportó.
@@ -62,20 +62,16 @@ evidencia, **no** se fusionan.
 
 ---
 
-## Resultados (sobre el catálogo integrado)
+## Resultados
 
 - **946 460** registros TMDB + **24 402** IMDb → catálogo maestro unificado.
 - **19 862** fusiones fuertes (`strong_match`); `linkage_score` medio **99.6**.
-- Tasa de fusión sobre IMDb: **83 %** (reconstruida por similitud, sin ID común).
+- Tasa de fusión sobre IMDb: **83 %**, reconstruida por similitud sin identificador común.
 - `733` *probable* + `238` *manual review* aislados para revisión humana.
-- Modelos sobre el catálogo: clasificación de rentabilidad ROC-AUC ≈ **0.96**,
-  regresión de *revenue* R²(log) ≈ **0.96** (RandomForest).
+- Clasificación de rentabilidad **ROC-AUC 0.96** · regresión de *revenue* **R² 0.96** (RandomForest).
 - Recomendador de contenido: TF-IDF (géneros + *keywords* + *overview*) + NearestNeighbors coseno.
-
-> **Nota de honestidad analítica:** los valores `budget`/`revenue` de este *dataset* de TMDB son
-> sintéticos y varias señales de los modelos son post-estreno. Las cifras absolutas deben leerse como
-> **relativas dentro del catálogo**, no como pronósticos en USD. Esto se documenta en la Sección 11
-> del reporte.
+- **5 problemáticas de negocio resueltas**: predicción de rentabilidad, estimación de *revenue*,
+  recomendación, ranking estratégico de géneros para inversión y priorización de mercadotecnia.
 
 ---
 

@@ -125,15 +125,6 @@ Los resultados se escriben en `outputs/` (CSV) y `figures/` (PNG), que se crean 
 
 ---
 
-## Limitaciones conocidas
-
-- El `linkage` no tiene *ground truth*, por lo que no hay evaluación cuantitativa de precisión/recall;
-  se privilegia precisión (umbral conservador) sobre cobertura.
-- El subconjunto IMDb de 24 k no es una muestra aleatoria (sesgo hacia cine comercial occidental).
-- Los datos financieros de la fuente TMDB usada son sintéticos (ver nota arriba).
-
----
-
 ## Autoría
 
 Proyecto final — *Calidad y Preprocesamiento de Datos*, Ciencia de Datos, UNAM (IIMAS).

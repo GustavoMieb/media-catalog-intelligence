@@ -1,96 +1,141 @@
-# Proyecto de Calidad de Datos — Películas TMDB + IMDb
+# Media Catalog Intelligence
 
-Pipeline modular de perfilado, limpieza, fusión y análisis de dos fuentes de datos cinematográficos.
+**Pipeline reproducible de calidad de datos e integración de dos fuentes cinematográficas
+(TMDB + IMDb) sin identificador común, bajo el marco TDQM (Total Data Quality Management).**
 
----
+El objetivo no es "juntar dos CSV": es **integrarlos de forma defendible y auditable**, produciendo
+un catálogo maestro (`movie_master`) donde cada dato conserva la trazabilidad de qué fuente lo aportó,
+tiene un score de calidad y queda marcado cuando las fuentes se contradicen.
 
-## Estructura del proyecto
-
-```
-proyecto/
-│
-├── main.py                   # Punto de entrada único (ejecutar esto)
-│
-├── config.py                 # Rutas, constantes y umbrales globales
-├── utils.py                  # Helpers compartidos (I/O, normalización, gráficas)
-│
-├── perfilado.py              # Paso 1 — Carga y perfilado inicial de las fuentes
-├── limpieza.py               # Paso 2 — Limpieza intra-fuente por campo
-├── fusion.py                 # Paso 3 — Record linkage + Golden Record (movie_master)
-├── analisis_calidad.py       # Paso 4 — Perfilado posterior, outliers y auditoría
-├── analisis.py               # Paso 5 — Consultas, modelos, recomendador y conclusiones
-│
-├── consultas_tmdb.py         # 5 consultas exclusivas sobre registros TMDB
-├── consultas_imdb.py         # 5 consultas exclusivas sobre registros IMDb
-├── consultas_multifuente.py  # 10 consultas integradas TMDB + IMDb
-│
-├── data/                     # Carpeta sugerida para los CSV fuente
-├── outputs/                  # CSVs generados (se crea automáticamente)
-├── figures/                  # Gráficas PNG (se crea automáticamente)
-└── reports/                  # Reportes adicionales (se crea automáticamente)
-```
+> 📄 **Reporte técnico completo (47 pp.):** [`docs/Reporte_Final.pdf`](docs/Reporte_Final.pdf)
 
 ---
 
-## Requisitos
+## El problema
 
-### Python
-Versión **3.9 o superior**.
+Las plataformas de *streaming*, distribuidoras y estudios toman decisiones financieras y de
+mercadotecnia sobre metadatos que viven repartidos en fuentes distintas. Esas fuentes:
 
-### Dependencias
-```bash
-pip install -r requirements.txt
-```
+- usan **identificadores propios** que no son comparables (`tmdb_id` numérico vs. rutas `/title/tt…/`),
+- nombran los campos distinto (`Generes`, `Plot Kyeword`) y con **errores de captura**,
+- guardan el mismo atributo con **formatos heterogéneos** (`"2 hours 27 minutes"`, `"142"`, `"not-released"`),
+- arrastran problemas sistemáticos: el **90 % de los años de IMDb** están almacenados con signo negativo;
+  el campo `Run Time` de IMDb viene contaminado con presupuestos y *ratings*.
+
+Un `merge` de pandas no resuelve nada de esto.
 
 ---
 
-## Datos de entrada
+## Qué hace el pipeline
 
-> Los CSV fuente **no se incluyen en el repositorio** por tamaño (`movies.csv` supera el
-> límite de 100 MB de GitHub). Descárgalos y colócalos en la carpeta `data/` (o en la raíz
-> del proyecto). El sistema los detecta automáticamente por nombre.
+| Paso | Módulo | Salida |
+|------|--------|--------|
+| 1. **Perfilado** inicial y diagnóstico por fuente | `perfilado.py` | reporte de calidad por columna, diagnósticos específicos |
+| 2. **Limpieza** intra-fuente por tipo de campo (texto, fecha, duración, dinero, conteos, géneros) | `limpieza.py` | `tmdb_clean.csv`, `imdb_clean.csv` |
+| 3. **Record linkage** probabilístico + **Golden Record** | `fusion.py` | `movie_master.csv`, archivos de auditoría de *matches* |
+| 4. **Perfilado posterior + outliers + auditoría** | `analisis_calidad.py` | `movie_master.csv` con flags, `audit_checks.csv` |
+| 5. **Análisis**: consultas, modelos, recomendador, rankings y conclusiones | `analisis.py` + `consultas_*.py` | 40+ CSV y 30+ figuras |
 
-| Fuente | Nombres de archivo aceptados |
-|--------|------------------------------|
-| TMDB   | `movies.csv` · `tmdb_movies.csv` · `movies_metadata_cleaned_1900_2025.csv` |
-| IMDb   | `25k IMDb movie Dataset.csv` · `25k_imdb_movie_dataset.csv` · `imdb_movies.csv` |
+### Record linkage en cascada
+
+1. **Match exacto** por `(título_normalizado, año)`
+2. **Título exacto** con tolerancia de año ±1
+3. **Fuzzy matching** (`rapidfuzz`, `token_set_ratio`) **bloqueado** por `(primera letra, año)` para
+   acotar el espacio de comparación de ~946 k × 24 k a algo tratable
+
+Cada par recibe un `linkage_score` compuesto (título 60 % · año 25 % · duración 10 % · género 5 %,
+renormalizado según las señales disponibles) y se resuelve **greedy 1-a-1**. Solo los
+`strong_match` (score ≥ 90) se fusionan; los `probable_match` y `manual_review` se persisten como
+evidencia, **no** se fusionan.
+
+### Decisiones de diseño
+
+- **Nunca se imputan `budget` ni `revenue`.** Un valor sintético contaminaría los modelos y los
+  rankings. Regla: *exactitud operativa > completitud cosmética.*
+- **El cero financiero se interpreta como faltante** (`zero_as_missing`): $0 de presupuesto no
+  significa que la película fuera gratuita, significa que el dato no se reportó.
+- **Los outliers no se eliminan**, se marcan con flags (IQR univariado + Isolation Forest multivariado).
+- **Trazabilidad a nivel de campo** (`source_trace`, `source_count`) y **conflict flags** cuando
+  TMDB e IMDb no coinciden en duración, *rating*, año o género.
+- **Data Quality Score por registro**: media ponderada de completitud, validez, consistencia,
+  unicidad y trazabilidad.
+
+---
+
+## Resultados (sobre el catálogo integrado)
+
+- **946 460** registros TMDB + **24 402** IMDb → catálogo maestro unificado.
+- **19 862** fusiones fuertes (`strong_match`); `linkage_score` medio **99.6**.
+- Tasa de fusión sobre IMDb: **83 %** (reconstruida por similitud, sin ID común).
+- `733` *probable* + `238` *manual review* aislados para revisión humana.
+- Modelos sobre el catálogo: clasificación de rentabilidad ROC-AUC ≈ **0.96**,
+  regresión de *revenue* R²(log) ≈ **0.96** (RandomForest).
+- Recomendador de contenido: TF-IDF (géneros + *keywords* + *overview*) + NearestNeighbors coseno.
+
+> **Nota de honestidad analítica:** los valores `budget`/`revenue` de este *dataset* de TMDB son
+> sintéticos y varias señales de los modelos son post-estreno. Las cifras absolutas deben leerse como
+> **relativas dentro del catálogo**, no como pronósticos en USD. Esto se documenta en la Sección 11
+> del reporte.
+
+---
+
+## Stack
+
+Python 3.11 · pandas · NumPy · scikit-learn · rapidfuzz · matplotlib
 
 ---
 
 ## Cómo ejecutar
 
-### Pipeline completo (recomendado)
 ```bash
-python main.py
+pip install -r requirements.txt
+python main.py                # pipeline completo
+python main.py --step 1-3     # solo perfilado → fusión
+python main.py --from 4       # desde outliers/auditoría (asume pasos previos hechos)
 ```
 
+Los CSV fuente **no se incluyen** (`movies.csv` supera el límite de 100 MB de GitHub). Descárgalos
+y colócalos en `data/`; el pipeline los detecta por nombre:
+
+| Fuente | Nombres aceptados |
+|--------|-------------------|
+| TMDB | `movies.csv` · `tmdb_movies.csv` · `movies_metadata_cleaned_1900_2025.csv` |
+| IMDb | `25k IMDb movie Dataset.csv` · `25k_imdb_movie_dataset.csv` · `imdb_movies.csv` |
+
+Los resultados se escriben en `outputs/` (CSV) y `figures/` (PNG), que se crean automáticamente.
 
 ---
 
-## Descripción de los módulos
+## Estructura
 
-### `perfilado.py`
-Carga las dos fuentes desde disco, detecta el archivo correcto automáticamente y genera un reporte de calidad por columna (tipo, nulos, unicidad) para cada fuente. Incluye diagnósticos específicos: años negativos en IMDb, revenue/budget en cero, formatos inválidos de runtime.
+```
+├── main.py                   # punto de entrada único
+├── config.py                 # rutas, umbrales y constantes
+├── utils.py                  # helpers de I/O, normalización y gráficas
+├── perfilado.py              # paso 1
+├── limpieza.py               # paso 2
+├── fusion.py                 # paso 3 — record linkage + Golden Record
+├── analisis_calidad.py       # paso 4 — outliers + auditoría
+├── analisis.py               # paso 5 — modelos, recomendador, conclusiones
+├── consultas_tmdb.py         # 5 consultas exclusivas TMDB
+├── consultas_imdb.py         # 5 consultas exclusivas IMDb
+├── consultas_multifuente.py  # 10 consultas integradas
+└── docs/Reporte_Final.pdf    # reporte técnico completo
+```
 
-### `limpieza.py`
-Aplica limpieza especializada por tipo de campo: normalización de títulos (clave de comparación), parseo robusto de runtime (formatos HH:MM, lenguaje natural, `not-released`), parseo de dinero con detección de ceros como faltantes, normalización canónica de géneros y deduplicación intra-fuente.
+---
 
-### `fusion.py`
-Record linkage en cascada de tres capas:
-1. Match exacto por `(title_norm, release_year)`
-2. Título exacto con año ±1
-3. Fuzzy bloqueado por `(primera_letra, año)`
+## Limitaciones conocidas
 
-Solo los matches con `linkage_score ≥ 90` se fusionan en el Golden Record. Los probable y manual_review se persisten para auditoría.
+- El `linkage` no tiene *ground truth*, por lo que no hay evaluación cuantitativa de precisión/recall;
+  se privilegia precisión (umbral conservador) sobre cobertura.
+- El subconjunto IMDb de 24 k no es una muestra aleatoria (sesgo hacia cine comercial occidental).
+- Los datos financieros de la fuente TMDB usada son sintéticos (ver nota arriba).
 
-### `analisis_calidad.py`
-Perfilado posterior del catálogo maestro. Detecta outliers univariados (IQR) y multivariados (Isolation Forest) sin eliminar registros — solo los marca con flags. Ejecuta 28 checks de auditoría técnica del proyecto.
+---
 
-### `analisis.py`
-Análisis completo de negocio:
-- **Consultas**: 5 por TMDB, 5 por IMDb, 10 integradas multi-fuente
-- **Modelos predictivos**: clasificación de rentabilidad (RandomForest vs LogisticRegression) y predicción de revenue (RandomForest vs GradientBoosting vs Ridge)
-- **Recomendador**: TF-IDF + NearestNeighbors con distancia coseno sobre géneros + keywords + overview
-- **Rankings**: géneros para inversión (strategic_investment_score) y películas para marketing (marketing_priority_score)
-- **Conclusiones**: técnicas y de negocio exportadas a CSV y TXT
+## Autoría
 
+Proyecto final — *Calidad y Preprocesamiento de Datos*, Ciencia de Datos, UNAM (IIMAS).
+Equipo: Ashley Yael López Espinoza · Denzel Gael Cruz Prieto · Gustavo Mier Basilio ·
+Pedro Manuel Cardón Carrillo · Salma Annette Rodríguez Muñoz.

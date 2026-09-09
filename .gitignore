@@ -26,3 +26,7 @@ Thumbs.db
 *.pdf
 *.7z
 *.zip
+
+# Excepción: el reporte final sí se versiona
+!docs/
+!docs/*.pdf

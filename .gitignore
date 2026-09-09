@@ -1,0 +1,28 @@
+# Datos fuente (grandes; movies.csv supera el límite de 100 MB de GitHub)
+data/
+*.csv
+
+# Artefactos generados por el pipeline
+outputs/
+figures/
+reports/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# Editores / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Documentos pesados (se comparten por separado)
+*.pdf
+*.7z
+*.zip
